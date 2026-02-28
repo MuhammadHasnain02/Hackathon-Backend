@@ -15,7 +15,7 @@ export const register = async (req, res) => {
       return res.status(409).json({ message: "Email already in use" });
     }
 
-    const user = await User.create({ email, password });
+    const user = await User.create({ email, password, role: req.body.role || "patient" });
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
@@ -26,7 +26,7 @@ export const register = async (req, res) => {
     res.status(201).json({
       accessToken,
       refreshToken,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, role: user.role, subscriptionPlan: user.subscriptionPlan },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -60,7 +60,7 @@ export const login = async (req, res) => {
     res.json({
       accessToken,
       refreshToken,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, role: user.role, subscriptionPlan: user.subscriptionPlan },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -113,7 +113,7 @@ export const me = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json({ user: { id: user._id, email: user.email } });
+    res.json({ user: { id: user._id, email: user.email, role: user.role, subscriptionPlan: user.subscriptionPlan } });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
