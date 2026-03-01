@@ -78,7 +78,7 @@ export const createAppointment = async (req, res) => {
 
 /**
  * PATCH /api/appointments/:id - Update status (e.g. Doctor confirms)
- */
+*/
 export const updateAppointment = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select("role");
