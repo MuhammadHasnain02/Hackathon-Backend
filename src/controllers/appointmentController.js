@@ -46,20 +46,23 @@ export const getAppointments = async (req, res) => {
 export const createAppointment = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select("role");
-    if (!user) return res.status(401).json({ message: "User not found" });
 
-    if (user.role !== "patient") {
-      return res.status(403).json({ message: "Only patients can book appointments" });
-    }
+    // if (!user || !user.id) {
+    //   return res.status(401).json({ message: "User not authenticated" });
+    // }
 
-    const { scheduledAt, reason } = req.body;
+    // if (user.role !== "patient") {
+    //   return res.status(403).json({ message: "Only patients can book appointments" });
+    // }
+
+    const { scheduledAt, reason , doctorId } = req.body;
     if (!scheduledAt) {
       return res.status(400).json({ message: "scheduledAt is required" });
     }
 
     const appointment = await Appointment.create({
       patientId: req.user.userId,
-      doctorId: null,
+      doctorId: doctorId || null,
       scheduledAt: new Date(scheduledAt),
       status: "pending",
       reason: reason || "",
@@ -70,6 +73,7 @@ export const createAppointment = async (req, res) => {
       .populate("doctorId", "email")
       .lean();
 
+    // await appointment.save();
     res.status(201).json({ appointment: populated });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -77,8 +81,15 @@ export const createAppointment = async (req, res) => {
 };
 
 /**
- * PATCH /api/appointments/:id - Update status (e.g. Doctor confirms)
-*/
+ * PATCH /api/appointments/:id - Update appointment with role-based permissions.
+ * - Admin: can update status, doctorId, scheduledAt, reason for any appointment
+ * - Receptionist: no write access (read-only via GET)
+ * - Doctor: can accept or decline their own appointments
+ *          (accept = confirmed, decline = cancelled)
+ * - Patient: can manage ONLY their own appointments
+ *            - cancel (status: cancelled)
+ *            - optionally reschedule (scheduledAt) and update reason
+ */
 export const updateAppointment = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select("role");
@@ -87,25 +98,62 @@ export const updateAppointment = async (req, res) => {
     const appointment = await Appointment.findById(req.params.id);
     if (!appointment) return res.status(404).json({ message: "Appointment not found" });
 
-    const { status, doctorId } = req.body;
+    const { status, doctorId, scheduledAt, reason } = req.body;
 
     if (user.role === "doctor") {
-      if (appointment.doctorId && appointment.doctorId.toString() !== req.user.userId) {
+      // Doctor: can only accept or decline appointments assigned to them
+      if (
+        appointment.doctorId &&
+        appointment.doctorId.toString() !== req.user.userId
+      ) {
         return res.status(403).json({ message: "Not your appointment" });
       }
+
       if (status === "confirmed") {
+        // Accept = confirmed
         appointment.status = "confirmed";
-        if (doctorId) appointment.doctorId = doctorId;
-        else appointment.doctorId = req.user.userId;
+        appointment.doctorId = doctorId || req.user.userId;
+      } else if (status === "cancelled") {
+        // Decline = cancelled
+        appointment.status = "cancelled";
+        // Optionally unassign doctor when declining
+        appointment.doctorId = null;
       }
-    } else if (user.role === "admin" || user.role === "receptionist") {
-      if (status) appointment.status = status;
-      if (doctorId !== undefined) appointment.doctorId = doctorId || null;
+    } else if (user.role === "admin") {
+      // Admin: full control over status, doctor assignment, and basic fields
+      if (status) {
+        appointment.status = status;
+      }
+      if (doctorId !== undefined) {
+        appointment.doctorId = doctorId || null;
+      }
+      if (scheduledAt) {
+        appointment.scheduledAt = new Date(scheduledAt);
+      }
+      if (typeof reason === "string") {
+        appointment.reason = reason;
+      }
+    } else if (user.role === "receptionist") {
+      // Receptionist: read-only, cannot modify appointments
+      return res.status(403).json({ message: "Receptionist cannot modify appointments" });
     } else if (user.role === "patient") {
+      // Patient: can only manage their own appointments
       if (appointment.patientId.toString() !== req.user.userId) {
         return res.status(403).json({ message: "Not your appointment" });
       }
-      if (status === "cancelled") appointment.status = "cancelled";
+
+      // Allow cancelling their own appointment
+      if (status === "cancelled") {
+        appointment.status = "cancelled";
+      }
+
+      // Allow basic updates (e.g. reschedule / change reason)
+      if (scheduledAt) {
+        appointment.scheduledAt = new Date(scheduledAt);
+      }
+      if (typeof reason === "string") {
+        appointment.reason = reason;
+      }
     } else {
       return res.status(403).json({ message: "Forbidden" });
     }
@@ -118,6 +166,40 @@ export const updateAppointment = async (req, res) => {
       .lean();
 
     res.json({ appointment: populated });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * DELETE /api/appointments/:id
+ * - Admin: can delete any appointment
+ * - Patient: can delete ONLY their own appointments
+ * - Other roles: forbidden
+ */
+export const deleteAppointment = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("role");
+    if (!user) return res.status(401).json({ message: "User not found" });
+
+    const appointment = await Appointment.findById(req.params.id);
+    if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+
+    if (user.role === "admin") {
+      // Admin can delete anything
+      await appointment.deleteOne();
+      return res.status(204).send();
+    }
+
+    if (user.role === "patient") {
+      if (appointment.patientId.toString() !== req.user.userId) {
+        return res.status(403).json({ message: "Not your appointment" });
+      }
+      await appointment.deleteOne();
+      return res.status(204).send();
+    }
+
+    return res.status(403).json({ message: "Forbidden" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
