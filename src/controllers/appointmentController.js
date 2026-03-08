@@ -45,7 +45,7 @@ export const getAppointments = async (req, res) => {
  */
 export const createAppointment = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select("role");
+    // const user = await User.findById(req.user.userId).select("role");
 
     // if (!user || !user.id) {
     //   return res.status(401).json({ message: "User not authenticated" });
@@ -55,13 +55,18 @@ export const createAppointment = async (req, res) => {
     //   return res.status(403).json({ message: "Only patients can book appointments" });
     // }
 
-    const { scheduledAt, reason , doctorId } = req.body;
+    const { scheduledAt, reason , doctorId , patientId } = req.body;
     if (!scheduledAt) {
       return res.status(400).json({ message: "scheduledAt is required" });
     }
 
+    // Agar receptionist hai to body se patientId le, warna login user ki ID le
+    const finalPatientId = req.user.role === 'receptionist' ? patientId : req.user.userId;
+    console.log(finalPatientId)
+
     const appointment = await Appointment.create({
-      patientId: req.user.userId,
+      patientId: finalPatientId,
+      // patientId: req.user.userId,
       doctorId: doctorId || null,
       scheduledAt: new Date(scheduledAt),
       status: "pending",
